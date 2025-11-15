@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         MGTools
+// @name         Hua'sMGTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.1
+// @version      1.0.0
 // @description  All-in-one assistant for Magic Garden with beautiful unified UI (Enhanced Discord Support!)
 // @author       Unified Script
-// @updateURL    https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js
-// @downloadURL  https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js
+// @updateURL    https://github.com/hua8211/MGTools/raw/refs/heads/main/MGTools.user.js
+// @downloadURL  https://github.com/hua8211/MGTools/raw/refs/heads/main/MGTools.user.js
 // @match        https://magiccircle.gg/r/*
 // @match        https://magicgarden.gg/r/*
 // @match        https://starweaver.org/r/*
@@ -16420,6 +16420,90 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
       }
     }
 
+    // ==================== HUA AUTO-BUY SYSTEM ====================
+
+    const AUTO_BUY_ITEMS = ['Carrot'];
+
+    let autoBuyInitizlied = false;
+    let autoBuyInterval = null;
+
+    function initializeAutoBuy() {
+      if (autoBuyInitizlied) return;
+
+      productionLog('Auto buy initializing auto buy system', AUTO_BUY_ITEMS);
+
+      autoBuyInterval = setInterval(() => {
+        checkAndBuyItems()
+      }, 3000);
+
+      autoBuyInitizlied = true;
+      productionLog('Auto buy initializied');
+     }
+
+     function checkAndBuyItems() {
+      try {
+        if (AUTO_BUY_ITEMS.length === 0) {
+          return;
+        }
+
+        const shop = targetWindow?.globalShop?.shop;
+        if(!shop) {
+          return;
+        }
+
+        AUTO_BUY_ITEMS.forEach(itemId => {
+          const shopTypes = ['seed', 'egg', 'tool', 'decor'];
+          for (const shopType of shopTypes) {
+            if (!shop || !shop.item) continue;
+            const item = shop.items.find(i => i.id === itemId || i.species === itemId || i.name === itemId);
+
+            if (item && item.stock > 0) {
+                const stock = item.stock;
+
+                if (UnifiedState.data.settings.debugMode) {
+                  productionLog(`Auto buy found ${itemId} with stock: ${stock}`);
+                }
+
+                autoBuyItem(itemId, shopType, 1);
+
+                break;
+            }
+          }
+        })
+      } catch (error) {
+        console.error('Auto buy error checking for itesm: ', error);
+      }
+     }
+
+     async function autoBuyItem(itemId, shopType, amount) {
+      try {
+        if (UnifiedState.data.settings.debugMode) {
+          productionLog(`Auto buy attemping to buy ${itemId} with stock: ${stock}`);
+        }
+
+        const payload = {
+          type: 'BuyShopItem',
+          shopType: shopType,
+          itemId: itemId,
+          amount: amount
+        };
+        await rcSend(payload);
+        productionLog(`Auto buy Purchased  ${itemId} with stock: ${stock}`);
+        showNotificationToast(`Auto buy ${itemId} x  ${stock}`, 'success');
+      } catch (error) {
+        console.error(`Auto buy error checking for ${itemId}: `, error);
+      }
+     }
+
+     targetWindow.autoBuyDebug = {
+      checkAndBuyItems,
+      getItems: () => AUTO_BUY_ITEMS,
+      testBuy: () => {
+        productionLog('Auto buy manula tet trigger');
+        checkAndBuyItems()
+      }
+     };
+
     // ==================== EVENT-DRIVEN SHOP MONITORING ====================
 
     let shopWatcherInitialized = false;
@@ -16613,6 +16697,9 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
 
       // Start watching
       watchShopData();
+
+      // HUA AUTO-BUY SYSTEM
+      initializeAutoBuy();
 
       // DISABLED: MutationObserver causes severe FPS lag - relying on Proxy and polling only
       // if (typeof MutationObserver !== 'undefined') {
