@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         Hua'sMGTools
+// @name         MGTools
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      2.1.1
 // @description  All-in-one assistant for Magic Garden with beautiful unified UI (Enhanced Discord Support!)
 // @author       Unified Script
-// @updateURL    https://github.com/hua8211/MGTools/raw/refs/heads/main/MGTools.user.js
-// @downloadURL  https://github.com/hua8211/MGTools/raw/refs/heads/main/MGTools.user.js
+// @updateURL    https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js
+// @downloadURL  https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js
 // @match        https://magiccircle.gg/r/*
 // @match        https://magicgarden.gg/r/*
 // @match        https://starweaver.org/r/*
@@ -23,110 +23,110 @@
 
 // --- EARLY RoomConnection trap (captures true scopePath ASAP) ---
 (function installEarlyRoomConnectionTrap() {
-  const KEY = 'MagicCircle_RoomConnection';
-  // CRITICAL: Use the ACTUAL page window, not sandbox
-  const targetWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const KEY = 'MagicCircle_RoomConnection';
+    // CRITICAL: Use the ACTUAL page window, not sandbox
+    const targetWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
-  if (targetWin.__mg_rc_trap_installed) return;
-  targetWin.__mg_rc_trap_installed = true;
+    if (targetWin.__mg_rc_trap_installed) return;
+    targetWin.__mg_rc_trap_installed = true;
 
-  function installHooks(rc) {
-    if (!rc || rc.__mg_scope_installed) return;
-    rc.__mg_scope_installed = true;
+    function installHooks(rc) {
+        if (!rc || rc.__mg_scope_installed) return;
+        rc.__mg_scope_installed = true;
 
-    const setLast = sp => {
-      if (Array.isArray(sp)) {
-        targetWin.__mga_lastScopePath = sp.slice();
+        const setLast = sp => {
+            if (Array.isArray(sp)) {
+                targetWin.__mga_lastScopePath = sp.slice();
+                // Debug only - uncomment if troubleshooting scopePath issues
+                // console.log('[MGTools ScopePatch] captured scopePath', targetWin.__mga_lastScopePath);
+            }
+        };
+
+        const origSend = rc.sendMessage ? .bind(rc);
+        if (origSend) {
+            rc.sendMessage = function(msg) {
+                try {
+                    setLast(msg ? .scopePath);
+                } catch {}
+                return origSend(msg);
+            };
+        }
+
+        const origDispatch = rc.dispatch ? .bind(rc) || rc._dispatch ? .bind(rc);
+        if (origDispatch) {
+            rc.dispatch = function(evt) {
+                try {
+                    setLast(evt ? .scopePath);
+                } catch {}
+                return origDispatch(evt);
+            };
+        }
+
         // Debug only - uncomment if troubleshooting scopePath issues
-        // console.log('[MGTools ScopePatch] captured scopePath', targetWin.__mga_lastScopePath);
-      }
-    };
+        // console.log('[MGTools ScopePatch] early RC trap installed');
+    }
 
-    const origSend = rc.sendMessage?.bind(rc);
-    if (origSend) {
-      rc.sendMessage = function (msg) {
+    // Check if RC already exists
+    if (targetWin[KEY]) {
         try {
-          setLast(msg?.scopePath);
-        } catch {}
-        return origSend(msg);
-      };
+            installHooks(targetWin[KEY]);
+        } catch (e) {
+            console.warn('[MGTools ScopePatch] install now failed', e);
+        }
+        return;
     }
 
-    const origDispatch = rc.dispatch?.bind(rc) || rc._dispatch?.bind(rc);
-    if (origDispatch) {
-      rc.dispatch = function (evt) {
-        try {
-          setLast(evt?.scopePath);
-        } catch {}
-        return origDispatch(evt);
-      };
-    }
-
-    // Debug only - uncomment if troubleshooting scopePath issues
-    // console.log('[MGTools ScopePatch] early RC trap installed');
-  }
-
-  // Check if RC already exists
-  if (targetWin[KEY]) {
-    try {
-      installHooks(targetWin[KEY]);
-    } catch (e) {
-      console.warn('[MGTools ScopePatch] install now failed', e);
-    }
-    return;
-  }
-
-  // Set trap for future RC
-  let _rc;
-  Object.defineProperty(targetWin, KEY, {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return _rc;
-    },
-    set(v) {
-      _rc = v;
-      try {
-        installHooks(v);
-      } catch (e) {
-        console.warn('[MGTools ScopePatch] install on set failed', e);
-      }
-    }
-  });
+    // Set trap for future RC
+    let _rc;
+    Object.defineProperty(targetWin, KEY, {
+        configurable: true,
+        enumerable: true,
+        get() {
+            return _rc;
+        },
+        set(v) {
+            _rc = v;
+            try {
+                installHooks(v);
+            } catch (e) {
+                console.warn('[MGTools ScopePatch] install on set failed', e);
+            }
+        }
+    });
 })();
 
 // ---- Simplified rcSend (waits for scopePath, then sends) ----
 async function rcSend(payload, opts = {}) {
-  const { retries = 10, delay = 120 } = opts;
-  const targetWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const { retries = 10, delay = 120 } = opts;
+    const targetWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
-  if (!payload || typeof payload !== 'object') {
-    console.warn('[MGTools] rcSend invalid payload:', payload);
-    return;
-  }
-
-  // Wait for scopePath to be captured
-  for (let i = 0; i <= retries; i++) {
-    const sp = targetWin.__mga_lastScopePath;
-    if (Array.isArray(sp)) {
-      payload.scopePath = sp.slice();
-      break;
+    if (!payload || typeof payload !== 'object') {
+        console.warn('[MGTools] rcSend invalid payload:', payload);
+        return;
     }
-    if (i === retries) {
-      // FALLBACK: Use known working scopePath structure
-      payload.scopePath = ['Room'];
-      console.warn('[MGTools] Using fallback scopePath ["Room"]');
-    }
-    await new Promise(r => setTimeout(r, delay));
-  }
 
-  try {
-    targetWin.MagicCircle_RoomConnection?.sendMessage(payload);
-    // Debug only - uncomment if troubleshooting message sending
-    // console.log('[MGTools] Sent with scopePath:', payload.scopePath);
-  } catch (e) {
-    console.error('[MGTools] rcSend error', e);
-  }
+    // Wait for scopePath to be captured
+    for (let i = 0; i <= retries; i++) {
+        const sp = targetWin.__mga_lastScopePath;
+        if (Array.isArray(sp)) {
+            payload.scopePath = sp.slice();
+            break;
+        }
+        if (i === retries) {
+            // FALLBACK: Use known working scopePath structure
+            payload.scopePath = ['Room'];
+            console.warn('[MGTools] Using fallback scopePath ["Room"]');
+        }
+        await new Promise(r => setTimeout(r, delay));
+    }
+
+    try {
+        targetWin.MagicCircle_RoomConnection ? .sendMessage(payload);
+        // Debug only - uncomment if troubleshooting message sending
+        // console.log('[MGTools] Sent with scopePath:', payload.scopePath);
+    } catch (e) {
+        console.error('[MGTools] rcSend error', e);
+    }
 }
 
 /**
@@ -186,1016 +186,1016 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
  */
 
 // === CSP Guard: Disable external Google Fonts in Discord/webview ===
-(function () {
-  try {
-    const isDiscord =
-      /discord|overlay|electron/i.test(navigator.userAgent) || window.DiscordNative || window.__discordApp;
-    if (isDiscord) {
-      console.log('🛡️ [CSP] External font loads disabled in Discord context.');
-    }
-    const origCreateElement = Document.prototype.createElement;
-    Document.prototype.createElement = function (tag) {
-      const el = origCreateElement.call(this, tag);
-      try {
-        if (isDiscord && tag && tag.toLowerCase() === 'link') {
-          const origSetAttribute = el.setAttribute;
-          el.setAttribute = function (name, value) {
-            if (name === 'href' && typeof value === 'string' && /fonts\.googleapis/i.test(value)) {
-              console.log('🛡️ [CSP] Prevented external font link injection:', value);
-              return;
-            }
-            return origSetAttribute.apply(this, arguments);
-          };
+(function() {
+    try {
+        const isDiscord =
+            /discord|overlay|electron/i.test(navigator.userAgent) || window.DiscordNative || window.__discordApp;
+        if (isDiscord) {
+            console.log('🛡️ [CSP] External font loads disabled in Discord context.');
         }
-      } catch (_) {
-        // Intentionally ignore setAttribute errors in restricted environments
-      }
-      return el;
-    };
-  } catch (_) {
-    // Intentionally ignore createElement override errors
-  }
+        const origCreateElement = Document.prototype.createElement;
+        Document.prototype.createElement = function(tag) {
+            const el = origCreateElement.call(this, tag);
+            try {
+                if (isDiscord && tag && tag.toLowerCase() === 'link') {
+                    const origSetAttribute = el.setAttribute;
+                    el.setAttribute = function(name, value) {
+                        if (name === 'href' && typeof value === 'string' && /fonts\.googleapis/i.test(value)) {
+                            console.log('🛡️ [CSP] Prevented external font link injection:', value);
+                            return;
+                        }
+                        return origSetAttribute.apply(this, arguments);
+                    };
+                }
+            } catch (_) {
+                // Intentionally ignore setAttribute errors in restricted environments
+            }
+            return el;
+        };
+    } catch (_) {
+        // Intentionally ignore createElement override errors
+    }
 })();
 
-(function () {
-  'use strict';
-
-  /* ============================================================================
-   * 3. STORAGE MODULE - START
-   * ============================================================================
-   * Unified storage abstraction with multiple fallback mechanisms
-   */
-
-  /**
-   * Unified Storage Module
-   * Provides consistent storage API with automatic fallback chain:
-   * GM Storage → localStorage → sessionStorage → memory
-   *
-   * @namespace Storage
-   */
-  const Storage = (() => {
-    // Private state
-    let initialized = false;
-    let storageType = null;
-    let gmApiAvailable = null;
-    const _gmApiWarningShown = false; // Reserved for future warning system
-    const memoryStore = {};
-    const storageTypes = {
-      GM: 'gm',
-      LOCAL: 'local',
-      SESSION: 'session',
-      MEMORY: 'memory'
-    };
-
-    // Storage references
-    let localStorageRef = null;
-    let sessionStorageRef = null;
-
-    /**
-     * Test if GM storage API is available and working
-     * @private
-     * @returns {boolean}
-     */
-    function testGMStorage() {
-      if (gmApiAvailable !== null) return gmApiAvailable;
-
-      try {
-        if (typeof GM_setValue === 'undefined' || typeof GM_getValue === 'undefined') {
-          gmApiAvailable = false;
-          return false;
-        }
-
-        // Test actual functionality
-        const testKey = '__mgtools_gm_test__';
-        const testValue = 'test_' + Date.now();
-        GM_setValue(testKey, testValue);
-        const retrieved = GM_getValue(testKey, null);
-
-        // Clean up
-        if (typeof GM_deleteValue !== 'undefined') {
-          try {
-            GM_deleteValue(testKey);
-          } catch (e) {
-            // Ignore GM_deleteValue errors during cleanup
-          }
-        }
-
-        gmApiAvailable = retrieved === testValue;
-        return gmApiAvailable;
-      } catch (e) {
-        gmApiAvailable = false;
-        return false;
-      }
-    }
-
-    /**
-     * Get localStorage reference (with Discord iframe workaround)
-     * @private
-     * @returns {Storage|null}
-     */
-    function getLocalStorage() {
-      if (localStorageRef) return localStorageRef;
-
-      try {
-        // Try direct access
-        if (window.localStorage && typeof window.localStorage !== 'undefined') {
-          const test = '__localStorage_test__';
-          window.localStorage.setItem(test, test);
-          window.localStorage.removeItem(test);
-          localStorageRef = window.localStorage;
-          return localStorageRef;
-        }
-      } catch (e) {
-        // Discord iframe workaround
-        try {
-          const iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          iframe.style.position = 'absolute';
-          iframe.style.width = '0';
-          iframe.style.height = '0';
-
-          if (document.body) {
-            document.body.appendChild(iframe);
-          } else {
-            document.documentElement.appendChild(iframe);
-          }
-
-          const iframeStorage = iframe.contentWindow.localStorage;
-          const test = '__mgtools_iframe_test__';
-          iframeStorage.setItem(test, test);
-          iframeStorage.removeItem(test);
-
-          localStorageRef = iframeStorage;
-          console.log('✅ [STORAGE] Using iframe localStorage workaround');
-          return localStorageRef;
-        } catch (iframeError) {
-          // Fallback failed
-        }
-      }
-
-      return null;
-    }
-
-    /**
-     * Get sessionStorage reference
-     * @private
-     * @returns {Storage|null}
-     */
-    function getSessionStorage() {
-      if (sessionStorageRef) return sessionStorageRef;
-
-      try {
-        if (window.sessionStorage && typeof window.sessionStorage !== 'undefined') {
-          const test = '__sessionStorage_test__';
-          window.sessionStorage.setItem(test, test);
-          window.sessionStorage.removeItem(test);
-          sessionStorageRef = window.sessionStorage;
-          return sessionStorageRef;
-        }
-      } catch (e) {
-        // sessionStorage not available or blocked
-      }
-
-      return null;
-    }
-
-    /**
-     * Initialize storage system and determine best available type
-     * @private
-     */
-    function initialize() {
-      if (initialized) return;
-
-      // Test storage types in order of preference
-      if (testGMStorage()) {
-        storageType = storageTypes.GM;
-        console.log('✅ [STORAGE] Using GM storage (persistent across domains)');
-      } else if (getLocalStorage()) {
-        storageType = storageTypes.LOCAL;
-        console.log('✅ [STORAGE] Using localStorage');
-      } else if (getSessionStorage()) {
-        storageType = storageTypes.SESSION;
-        console.warn('⚠️ [STORAGE] Using sessionStorage (data lost on tab close)');
-      } else {
-        storageType = storageTypes.MEMORY;
-        console.warn('⚠️ [STORAGE] Using memory storage (data lost on refresh)');
-      }
-
-      initialized = true;
-    }
-
-    /**
-     * Get item from storage
-     * @param {string} key - Storage key
-     * @param {*} [defaultValue=null] - Default value if not found
-     * @returns {*} Value or default
-     */
-    function getItem(key, defaultValue = null) {
-      initialize();
-
-      try {
-        let value = null;
-
-        switch (storageType) {
-          case storageTypes.GM:
-            value = GM_getValue(key, null);
-            break;
-          case storageTypes.LOCAL:
-            value = localStorageRef.getItem(key);
-            break;
-          case storageTypes.SESSION:
-            value = sessionStorageRef.getItem(key);
-            break;
-          case storageTypes.MEMORY:
-            value = memoryStore[key] || null;
-            break;
-        }
-
-        // Try to parse JSON if applicable
-        if (value && typeof value === 'string') {
-          try {
-            return JSON.parse(value);
-          } catch (e) {
-            return value;
-          }
-        }
-
-        return value !== null ? value : defaultValue;
-      } catch (e) {
-        console.error('[STORAGE] getItem error:', e);
-        return defaultValue;
-      }
-    }
-
-    /**
-     * Set item in storage
-     * @param {string} key - Storage key
-     * @param {*} value - Value to store
-     * @returns {boolean} Success status
-     */
-    function setItem(key, value) {
-      initialize();
-
-      try {
-        // Convert objects to JSON
-        const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
-
-        switch (storageType) {
-          case storageTypes.GM:
-            GM_setValue(key, stringValue);
-            break;
-          case storageTypes.LOCAL:
-            localStorageRef.setItem(key, stringValue);
-            break;
-          case storageTypes.SESSION:
-            sessionStorageRef.setItem(key, stringValue);
-            break;
-          case storageTypes.MEMORY:
-            memoryStore[key] = stringValue;
-            break;
-        }
-
-        return true;
-      } catch (e) {
-        console.error('[STORAGE] setItem error:', e);
-
-        // Try fallback to memory if other storage fails
-        if (storageType !== storageTypes.MEMORY) {
-          try {
-            memoryStore[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            console.warn('[STORAGE] Fallback to memory for key:', key);
-            return true;
-          } catch (e2) {}
-        }
-
-        return false;
-      }
-    }
-
-    /**
-     * Remove item from storage
-     * @param {string} key - Storage key
-     * @returns {boolean} Success status
-     */
-    function removeItem(key) {
-      initialize();
-
-      try {
-        switch (storageType) {
-          case storageTypes.GM:
-            if (typeof GM_deleteValue !== 'undefined') {
-              GM_deleteValue(key);
-            } else {
-              GM_setValue(key, undefined);
-            }
-            break;
-          case storageTypes.LOCAL:
-            localStorageRef.removeItem(key);
-            break;
-          case storageTypes.SESSION:
-            sessionStorageRef.removeItem(key);
-            break;
-          case storageTypes.MEMORY:
-            delete memoryStore[key];
-            break;
-        }
-
-        return true;
-      } catch (e) {
-        console.error('[STORAGE] removeItem error:', e);
-        return false;
-      }
-    }
-
-    /**
-     * Clear all storage (use with caution)
-     * @returns {boolean} Success status
-     */
-    function clear() {
-      initialize();
-
-      try {
-        switch (storageType) {
-          case storageTypes.GM:
-            // GM storage doesn't have a clear method, would need to track keys
-            console.warn('[STORAGE] GM storage clear not implemented');
-            break;
-          case storageTypes.LOCAL:
-            localStorageRef.clear();
-            break;
-          case storageTypes.SESSION:
-            sessionStorageRef.clear();
-            break;
-          case storageTypes.MEMORY:
-            Object.keys(memoryStore).forEach(key => delete memoryStore[key]);
-            break;
-        }
-
-        return true;
-      } catch (e) {
-        console.error('[STORAGE] clear error:', e);
-        return false;
-      }
-    }
-
-    /**
-     * Get current storage type
-     * @returns {string|null} Current storage type
-     */
-    function getStorageType() {
-      initialize();
-      return storageType;
-    }
-
-    /**
-     * Get storage info for debugging
-     * @returns {Object} Storage information
-     */
-    function getInfo() {
-      initialize();
-      return {
-        type: storageType,
-        gmAvailable: gmApiAvailable,
-        localStorageAvailable: localStorageRef !== null,
-        sessionStorageAvailable: sessionStorageRef !== null,
-        memoryKeys: Object.keys(memoryStore).length
-      };
-    }
-
-    // Public API
-    return {
-      get: getItem,
-      set: setItem,
-      remove: removeItem,
-      clear,
-      getType: getStorageType,
-      getInfo,
-
-      // Legacy compatibility
-      getItem,
-      setItem,
-      removeItem,
-
-      // Storage type constants
-      TYPES: storageTypes
-    };
-  })();
-
-  // Legacy compatibility - maintain old references
-  const _safeStorage = Storage; // Kept for backwards compatibility
-  const localStorage = {
-    getItem: key => Storage.get(key),
-    setItem: (key, value) => Storage.set(key, value),
-    removeItem: key => Storage.remove(key),
-    clear: () => Storage.clear(),
-    get length() {
-      console.warn('[STORAGE] localStorage.length not supported in unified storage');
-      return 0;
-    },
-    key: _index => {
-      console.warn('[STORAGE] localStorage.key() not supported in unified storage');
-      return null;
-    }
-  };
-
-  /* ============================================================================
-   * 4. CONFIGURATION MODULE - START
-   * ============================================================================
-   * Global constants, version info, URLs, and configuration values
-   */
-
-  /**
-   * Main configuration object containing all global settings
-   * @namespace CONFIG
-   * @constant {Object}
-   */
-  const CONFIG = {
-    // Version Information
-    VERSION: {
-      CURRENT: '2.1.1',
-      CHECK_URL_STABLE: 'https://raw.githubusercontent.com/Myke247/MGTools/main/MGTools.user.js',
-      CHECK_URL_BETA: 'https://raw.githubusercontent.com/Myke247/MGTools/Live-Beta/MGTools.user.js',
-      DOWNLOAD_URL_STABLE: 'https://github.com/Myke247/MGTools/raw/refs/heads/main/MGTools.user.js',
-      DOWNLOAD_URL_BETA: 'https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js'
-    },
-
-    // Debug Settings
-    DEBUG: {
-      PRODUCTION: true, // Set to false for verbose debug logging
-      FLAGS: {
-        OVERLAY_LIFECYCLE: false,
-        HANDLER_SETUP: false,
-        THEME_APPLICATION: false,
-        VALUE_CALCULATIONS: false,
-        ABILITY_LOGS: false,
-        BUTTON_INTERACTIONS: false,
-        POP_OUT_DESIGN: false,
-        ERROR_TRACKING: true,
-        PERFORMANCE: false,
-        FIX_VALIDATION: false // Enable to see fix debug logs during testing (now controlled by debugMode setting)
-      }
-    },
-
-    // UI Settings
-    UI: {
-      DEFAULT_OPACITY: 95,
-      DEFAULT_POPOUT_OPACITY: 50,
-      DEFAULT_THEME: 'default',
-      DEFAULT_GRADIENT: 'blue-purple',
-      DEFAULT_EFFECT: 'none',
-      DOCK_WIDTH: 380,
-      DOCK_MIN_WIDTH: 320,
-      DOCK_MAX_WIDTH: 600,
-      TAB_HEIGHT: 40,
-      ANIMATION_DURATION: 300
-    },
-
-    // Timing Settings
-    TIMERS: {
-      AUTO_SAVE_INTERVAL: 30000, // 30 seconds
-      CONNECTION_CHECK_INTERVAL: 5000, // 5 seconds
-      HEARTBEAT_INTERVAL: 300000, // 5 minutes
-      SHOP_CHECK_INTERVAL: 3000, // 3 seconds
-      PET_HUNGER_CHECK_INTERVAL: 60000 // 1 minute
-    },
-
-    // API Settings
-    API: {
-      BASE_URL_PRIMARY: 'https://magiccircle.gg',
-      BASE_URL_FALLBACK: 'https://magicgarden.gg',
-      ENDPOINTS: {
-        ROOMS: '/api/rooms',
-        SHOP: '/api/shop',
-        PETS: '/api/pets',
-        INVENTORY: '/api/inventory'
-      }
-    },
-
-    // Game Data - Decoration Items
-    DECOR_ITEMS: [
-      // Rocks
-      { id: 'SmallRock', name: 'Small Garden Rock', category: 'Rocks' },
-      { id: 'MediumRock', name: 'Medium Garden Rock', category: 'Rocks' },
-      { id: 'LargeRock', name: 'Large Garden Rock', category: 'Rocks' },
-      // Wood Items
-      { id: 'WoodBench', name: 'Wood Bench', category: 'Wood' },
-      { id: 'WoodArch', name: 'Wood Arch', category: 'Wood' },
-      { id: 'WoodBridge', name: 'Wood Bridge', category: 'Wood' },
-      { id: 'WoodLampPost', name: 'Wood Lamp Post', category: 'Wood' },
-      { id: 'WoodOwl', name: 'Wood Owl', category: 'Wood' },
-      { id: 'WoodBirdhouse', name: 'Wood Birdhouse', category: 'Wood' },
-      // Stone Items
-      { id: 'StoneBench', name: 'Stone Bench', category: 'Stone' },
-      { id: 'StoneArch', name: 'Stone Arch', category: 'Stone' },
-      { id: 'StoneBridge', name: 'Stone Bridge', category: 'Stone' },
-      { id: 'StoneLampPost', name: 'Stone Lamp Post', category: 'Stone' },
-      { id: 'StoneGnome', name: 'Stone Gnome', category: 'Stone' },
-      { id: 'StoneBirdbath', name: 'Stone Birdbath', category: 'Stone' },
-      // Marble Items
-      { id: 'MarbleBench', name: 'Marble Bench', category: 'Marble' },
-      { id: 'MarbleArch', name: 'Marble Arch', category: 'Marble' },
-      { id: 'MarbleBridge', name: 'Marble Bridge', category: 'Marble' },
-      { id: 'MarbleLampPost', name: 'Marble Lamp Post', category: 'Marble' }
-    ]
-  };
-
-  // Legacy compatibility - maintain old variable names
-  const CURRENT_VERSION = CONFIG.VERSION.CURRENT;
-  const _VERSION_CHECK_URL_STABLE = CONFIG.VERSION.CHECK_URL_STABLE;
-  const _VERSION_CHECK_URL_BETA = CONFIG.VERSION.CHECK_URL_BETA;
-  const STABLE_DOWNLOAD_URL = CONFIG.VERSION.DOWNLOAD_URL_STABLE;
-  const BETA_DOWNLOAD_URL = CONFIG.VERSION.DOWNLOAD_URL_BETA;
-
-  // Detect if running Live Beta version (check @updateURL in script)
-  // Safe check for Discord pop-out and console paste compatibility
-  const IS_LIVE_BETA = (() => {
-    try {
-      if (typeof GM_info === 'undefined') {
-        return false;
-      }
-      return GM_info?.script?.updateURL?.includes('Live-Beta') || false;
-    } catch (e) {
-      console.warn('[MGTOOLS] Branch detection failed:', e.message);
-      return false;
-    }
-  })();
-
-  // Detect if running without Tampermonkey (console paste or incompatible environment)
-  const isRunningWithoutTampermonkey = typeof GM_info === 'undefined';
-
-  if (isRunningWithoutTampermonkey) {
-    console.error('%c⚠️ MGTOOLS INSTALLATION ERROR', 'font-size:16px;color:#ff0000;font-weight:bold');
-    console.error('%cMGTools MUST be installed via Tampermonkey!', 'font-size:14px;color:#ff9900');
-    console.error('%cDo NOT paste the script in console - it will not work correctly!', 'font-size:14px;color:#ff9900');
-    console.error(
-      '%c\n📋 Correct Installation:\n1. Install Tampermonkey: https://www.tampermonkey.net/\n2. Click: https://github.com/Myke247/MGTools/raw/main/MGTools.user.js\n3. Click "Install" button\n4. Refresh Magic Garden',
-      'font-size:12px;color:#00ffff'
-    );
-
-    // Try to continue anyway using localStorage fallback
-    console.warn('%c⚠️ Attempting to run in fallback mode (limited functionality)...', 'font-size:12px;color:#ffff00');
-  }
-
-  // Semantic version comparison function
-  function compareVersions(v1, v2) {
-    // Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-
-    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-      const part1 = parts1[i] || 0;
-      const part2 = parts2[i] || 0;
-
-      if (part1 > part2) return 1;
-      if (part1 < part2) return -1;
-    }
-
-    return 0;
-  }
-
-  /* ============================================================================
-   * 5. LOGGING MODULE - START
-   * ============================================================================
-   * Unified logging system with production/debug modes and categories
-   */
-
-  /**
-   * Unified logging system with production/debug modes
-   * @namespace Logger
-   */
-  const Logger = (() => {
-    // Configuration
-    const PRODUCTION = CONFIG.DEBUG.PRODUCTION;
-    const DEBUG_FLAGS = CONFIG.DEBUG.FLAGS;
-
-    // Logging levels
-    const LogLevel = {
-      NONE: 0,
-      ERROR: 1,
-      WARN: 2,
-      INFO: 3,
-      DEBUG: 4
-    };
-
-    const CURRENT_LOG_LEVEL = PRODUCTION ? LogLevel.WARN : LogLevel.DEBUG;
-    const tooltipContainer = null;
-
-    /**
-     * Core logging function with level and category support
-     * @private
-     * @param {number} level - Log level
-     * @param {string} category - Log category
-     * @param {string} message - Log message
-     * @param {*} [data] - Optional data to log
-     */
-    function log(level, category, message, data) {
-      if (level > CURRENT_LOG_LEVEL) return;
-
-      const prefix = `[${category}]`;
-      const args = data !== undefined ? [prefix, message, data] : [prefix, message];
-
-      if (level === LogLevel.ERROR) console.error(...args);
-      else if (level === LogLevel.WARN) console.warn(...args);
-      else console.log(...args);
-    }
-
-    /**
-     * Debug log for specific debug flags
-     * @param {string} flag - Debug flag to check
-     * @param {string} message - Log message
-     * @param {*} [data] - Optional data
-     */
-    function debugLog(flag, message, data = null) {
-      if (!PRODUCTION && DEBUG_FLAGS[flag]) {
-        const timestamp = new Date().toLocaleTimeString();
-        log(LogLevel.DEBUG, `DEBUG-${flag}`, `${timestamp} ${message}`, data);
-      }
-    }
-
-    /**
-     * Debug error logging
-     * @param {string} flag - Debug flag to check
-     * @param {string} message - Error message
-     * @param {Error} error - Error object
-     * @param {Object} [context] - Additional context
-     */
-    function debugError(flag, message, error, context = {}) {
-      if (DEBUG_FLAGS[flag] || DEBUG_FLAGS.ERROR_TRACKING) {
-        const timestamp = new Date().toLocaleTimeString();
-        log(LogLevel.ERROR, `ERROR-${flag}`, `${timestamp} ${message}`, {
-          error: error,
-          context: context,
-          stack: error?.stack
-        });
-      }
-    }
-
-    // Public API
-    const api = {
-      // Core logging methods
-      error: (cat, msg, data) => log(LogLevel.ERROR, cat, msg, data),
-      warn: (cat, msg, data) => log(LogLevel.WARN, cat, msg, data),
-      info: (cat, msg, data) => log(LogLevel.INFO, cat, msg, data),
-      debug: (cat, msg, data) => log(LogLevel.DEBUG, cat, msg, data),
-
-      // Debug logging methods
-      debugLog,
-      debugError,
-
-      // Legacy support methods
-      productionLog: (...args) => {
-        const message = String(args[0] || '');
-        const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
-        const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
-        api.info(category, ...args);
-      },
-      productionWarn: (...args) => {
-        const message = String(args[0] || '');
-        const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
-        const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
-        api.warn(category, ...args);
-      },
-      productionError: (...args) => {
-        const message = String(args[0] || '');
-        const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
-        const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
-        api.error(category, ...args);
-      }
-    };
-
-    return api;
-  })();
-
-  // Export legacy function names for compatibility
-  const logError = Logger.error;
-  const logWarn = Logger.warn;
-  const logInfo = Logger.info;
-  const logDebug = Logger.debug;
-  const debugLog = Logger.debugLog;
-  const debugError = Logger.debugError;
-  const productionLog = Logger.productionLog;
-  const productionWarn = Logger.productionWarn;
-  const productionError = Logger.productionError;
-
-  // Export globally for IIFE access
-  if (typeof window !== 'undefined') {
-    window.Logger = Logger;
-    window.productionLog = productionLog;
-    window.productionWarn = productionWarn;
-    window.productionError = productionError;
-    window.debugLog = debugLog;
-    window.debugError = debugError;
-  }
-
-  /* ============================================================================
-   * 6. COMPATIBILITY MODULE - EXTENDED
-   * ============================================================================
-   * Advanced CSP detection and compatibility mode for Discord/managed devices
-   */
-
-  /**
-   * Compatibility mode system for handling restricted environments
-   * @namespace CompatibilityMode
-   */
-  const CompatibilityMode = {
-    flags: {
-      enabled: false,
-      blockExternalFonts: false,
-      blockExternalBeacons: false,
-      wsReconnectWhenHidden: false,
-      strictNoEvalDynamicImport: false,
-      inlineAssetsOnly: false,
-      uiReducedMode: false,
-      domOnlyStyles: false,
-      bypassCSPNetworking: false
-    },
-
-    detectionComplete: false,
-    cspViolations: [],
-    detectionReason: null,
-
-    detect() {
-      // Check for user override first
-      try {
-        const disabled = localStorage.getItem('mgtools_compat_disabled');
-        if (disabled === 'true') {
-          logInfo('COMPAT', 'Compatibility mode disabled by user');
-          this.detectionComplete = true;
-          return;
-        }
-
-        const forced = localStorage.getItem('mgtools_compat_forced');
-        if (forced === 'true') {
-          this.enableCompat('user-forced');
-          this.detectionComplete = true;
-          return;
-        }
-      } catch (e) {
-        logWarn('COMPAT', 'Unable to check localStorage for compat settings', e);
-      }
-
-      // 1. Discord embed detection (enhanced)
-      const host = window.location.host;
-      const isDiscordHost =
-        host.includes('discordsays.com') ||
-        host.includes('discordactivities.com') ||
-        host.includes('discord.gg') ||
-        host.includes('discord.com');
-      const isDiscordDesktop = typeof window.DiscordNative !== 'undefined';
-      const inDiscordIframe = window !== window.top && document.referrer?.includes('discord');
-      const hasDiscordSDK = typeof window.DiscordSDK !== 'undefined' || typeof window.__DISCORD__ !== 'undefined';
-
-      const isDiscordEmbed = isDiscordHost || isDiscordDesktop || inDiscordIframe || hasDiscordSDK;
-
-      if (CONFIG.DEBUG.FLAGS.FIX_VALIDATION) {
-        console.log('[FIX_DISCORD]', {
-          host: isDiscordHost,
-          desktop: isDiscordDesktop,
-          iframe: inDiscordIframe,
-          sdk: hasDiscordSDK,
-          scope: typeof unsafeWindow !== 'undefined' ? 'unsafeWindow' : 'window'
-        });
-      }
-
-      /**
-       * Discord CSP Constraints:
-       * - No external stylesheets (Google Fonts blocked)
-       * - Limited fetch (use GM_xmlhttpRequest)
-       * - Storage fallback to sessionStorage/memory
-       * - Scope bridging via unsafeWindow when available
-       */
-
-      if (isDiscordEmbed) {
-        this.enableCompat('discord-embed');
-        this.detectionComplete = true;
-        return;
-      }
-
-      // 2. CSP violation listener (500ms window) with duplicate prevention
-      // CRITICAL FIX: Opera/Tampermonkey makes console.error read-only, causing fatal crash
-      const self = this;
-      const seenCSPMessages = new Set();
-
-      try {
-        // Check if console.error is writable before attempting override
-        const descriptor = Object.getOwnPropertyDescriptor(console, 'error');
-        const canOverride = !descriptor || descriptor.writable || descriptor.configurable;
-
-        if (canOverride) {
-          // Safe to override console.error
-          const originalError = console.error.bind(console);
-
-          console.error = function (...args) {
-            const msg = args.join(' ');
-
-            // Check for CSP-related errors
-            if (
-              (msg.includes('Content Security Policy') ||
-                msg.includes('Refused to load') ||
-                msg.includes('violates the following')) &&
-              !msg.includes('mgtools')
-            ) {
-              // Ignore our own CSP issues
-
-              // Skip duplicate CSP violations to reduce console spam
-              if (seenCSPMessages.has(msg)) {
-                return; // Silently skip duplicate
-              }
-              seenCSPMessages.add(msg);
-
-              self.cspViolations.push(msg);
-              if (self.cspViolations.length >= 2 && !self.flags.enabled) {
-                self.enableCompat('csp-violations');
-              }
-            }
-            return originalError.apply(console, args);
-          };
-
-          logInfo('COMPAT', '✅ Console.error override successful for CSP detection');
-        } else {
-          // Console.error is read-only (Opera/Tampermonkey) - use alternative detection
-          logWarn('COMPAT', '⚠️ Console.error is read-only, using alternative CSP detection');
-
-          // Alternative: listen for window error events
-          window.addEventListener(
-            'error',
-            event => {
-              const msg = event.message || '';
-              if (
-                (msg.includes('Content Security Policy') ||
-                  msg.includes('Refused to load') ||
-                  msg.includes('violates the following')) &&
-                !msg.includes('mgtools') &&
-                !seenCSPMessages.has(msg)
-              ) {
-                seenCSPMessages.add(msg);
-                self.cspViolations.push(msg);
-                if (self.cspViolations.length >= 2 && !self.flags.enabled) {
-                  self.enableCompat('csp-violations');
+(function() {
+        'use strict';
+
+        /* ============================================================================
+         * 3. STORAGE MODULE - START
+         * ============================================================================
+         * Unified storage abstraction with multiple fallback mechanisms
+         */
+
+        /**
+         * Unified Storage Module
+         * Provides consistent storage API with automatic fallback chain:
+         * GM Storage → localStorage → sessionStorage → memory
+         *
+         * @namespace Storage
+         */
+        const Storage = (() => {
+            // Private state
+            let initialized = false;
+            let storageType = null;
+            let gmApiAvailable = null;
+            const _gmApiWarningShown = false; // Reserved for future warning system
+            const memoryStore = {};
+            const storageTypes = {
+                GM: 'gm',
+                LOCAL: 'local',
+                SESSION: 'session',
+                MEMORY: 'memory'
+            };
+
+            // Storage references
+            let localStorageRef = null;
+            let sessionStorageRef = null;
+
+            /**
+             * Test if GM storage API is available and working
+             * @private
+             * @returns {boolean}
+             */
+            function testGMStorage() {
+                if (gmApiAvailable !== null) return gmApiAvailable;
+
+                try {
+                    if (typeof GM_setValue === 'undefined' || typeof GM_getValue === 'undefined') {
+                        gmApiAvailable = false;
+                        return false;
+                    }
+
+                    // Test actual functionality
+                    const testKey = '__mgtools_gm_test__';
+                    const testValue = 'test_' + Date.now();
+                    GM_setValue(testKey, testValue);
+                    const retrieved = GM_getValue(testKey, null);
+
+                    // Clean up
+                    if (typeof GM_deleteValue !== 'undefined') {
+                        try {
+                            GM_deleteValue(testKey);
+                        } catch (e) {
+                            // Ignore GM_deleteValue errors during cleanup
+                        }
+                    }
+
+                    gmApiAvailable = retrieved === testValue;
+                    return gmApiAvailable;
+                } catch (e) {
+                    gmApiAvailable = false;
+                    return false;
                 }
-              }
-            },
-            true
-          );
-        }
-      } catch (e) {
-        // Complete failure - continue without CSP detection
-        logWarn('COMPAT', '❌ Cannot setup CSP detection:', e.message);
-        logInfo('COMPAT', 'Continuing without CSP violation detection');
-      }
+            }
 
-      // 3. Test storage availability
-      setTimeout(() => {
-        if (!this.flags.enabled) {
-          try {
-            const testKey = '__mgtools_compat_test_' + Date.now();
-            GM_setValue(testKey, 'test');
-            GM_deleteValue(testKey);
-          } catch (e) {
-            this.enableCompat('storage-failed');
-          }
-        }
+            /**
+             * Get localStorage reference (with Discord iframe workaround)
+             * @private
+             * @returns {Storage|null}
+             */
+            function getLocalStorage() {
+                if (localStorageRef) return localStorageRef;
 
-        this.detectionComplete = true;
-        if (this.flags.enabled) {
-          logInfo('COMPAT', 'Compatibility mode ACTIVE', {
-            reason: this.detectionReason,
-            violations: this.cspViolations.length
-          });
-        } else {
-          logDebug('COMPAT', 'Compatibility mode not needed, running in normal mode');
-        }
-      }, 500);
-    },
+                try {
+                    // Try direct access
+                    if (window.localStorage && typeof window.localStorage !== 'undefined') {
+                        const test = '__localStorage_test__';
+                        window.localStorage.setItem(test, test);
+                        window.localStorage.removeItem(test);
+                        localStorageRef = window.localStorage;
+                        return localStorageRef;
+                    }
+                } catch (e) {
+                    // Discord iframe workaround
+                    try {
+                        const iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.style.position = 'absolute';
+                        iframe.style.width = '0';
+                        iframe.style.height = '0';
 
-    enableCompat(reason) {
-      if (this.flags.enabled) return; // Already enabled
+                        if (document.body) {
+                            document.body.appendChild(iframe);
+                        } else {
+                            document.documentElement.appendChild(iframe);
+                        }
 
-      logInfo('COMPAT', `Enabling compatibility mode: ${reason}`);
+                        const iframeStorage = iframe.contentWindow.localStorage;
+                        const test = '__mgtools_iframe_test__';
+                        iframeStorage.setItem(test, test);
+                        iframeStorage.removeItem(test);
 
-      // Discord Fix: Add detailed Discord-specific logging
-      const isDiscordReason = reason.includes('discord') || reason.includes('csp');
-      if (isDiscordReason) {
-        productionLog('🎮 [DISCORD] Compatibility mode activated for Discord environment');
-        productionLog('   📋 [DISCORD] Features enabled:');
-        productionLog('      • Inline styles only (no external CSS)');
-        productionLog('      • System fonts (no Google Fonts CDN)');
-        productionLog('      • GM_xmlhttpRequest for network requests');
-        productionLog('      • DOM mutation observer for UI persistence');
-      }
-
-      this.detectionReason = reason;
-      this.flags.enabled = true;
-      this.flags.blockExternalFonts = true;
-      this.flags.blockExternalBeacons = true;
-      this.flags.wsReconnectWhenHidden = true;
-      this.flags.strictNoEvalDynamicImport = true;
-      this.flags.inlineAssetsOnly = true;
-      this.flags.uiReducedMode = true;
-      this.flags.domOnlyStyles = true;
-      this.flags.bypassCSPNetworking = true;
-
-      // Save preference
-      try {
-        localStorage.setItem('mgtools_compat_mode', 'true');
-        localStorage.setItem('mgtools_compat_reason', reason);
-      } catch (e) {
-        // Ignore localStorage errors in restricted environments
-      }
-    },
-
-    disableCompat() {
-      this.flags.enabled = false;
-      Object.keys(this.flags).forEach(key => {
-        if (key !== 'enabled') this.flags[key] = false;
-      });
-
-      try {
-        localStorage.setItem('mgtools_compat_disabled', 'true');
-        localStorage.removeItem('mgtools_compat_mode');
-      } catch (e) {}
-
-      logInfo('COMPAT', 'Compatibility mode disabled');
-    },
-
-    isEnabled() {
-      return this.flags.enabled;
-    }
-  };
-
-  // Initialize compatibility detection immediately
-  CompatibilityMode.detect();
-
-  /* ============================================================================
-   * 7. NETWORK MODULE - START
-   * ============================================================================
-   * Unified network layer with CSP bypass capabilities
-   */
-
-  /**
-   * Network abstraction layer with fallback to GM_xmlhttpRequest
-   * @namespace Network
-   */
-  const Network = {
-    async fetch(url, options = {}) {
-      if (
-        CompatibilityMode.flags.bypassCSPNetworking &&
-        typeof GM_xmlhttpRequest === 'function' &&
-        !url.startsWith(window.location.origin)
-      ) {
-        // Use GM_xmlhttpRequest to bypass CSP for external requests
-        logDebug('NETWORK', `Using GM_xmlhttpRequest for: ${url}`);
-        return new Promise((resolve, reject) => {
-          GM_xmlhttpRequest({
-            url,
-            method: options.method || 'GET',
-            headers: options.headers || {},
-            data: options.body,
-            responseType: 'text',
-            timeout: options.timeout || 10000,
-            onload: response => {
-              resolve({
-                ok: response.status >= 200 && response.status < 300,
-                status: response.status,
-                statusText: response.statusText,
-                text: () => Promise.resolve(response.responseText),
-                json: () => Promise.resolve(JSON.parse(response.responseText)),
-                headers: {
-                  get: name => response.responseHeaders.match(new RegExp(`^${name}:\\s*(.*)$`, 'mi'))?.[1]
+                        localStorageRef = iframeStorage;
+                        console.log('✅ [STORAGE] Using iframe localStorage workaround');
+                        return localStorageRef;
+                    } catch (iframeError) {
+                        // Fallback failed
+                    }
                 }
-              });
+
+                return null;
+            }
+
+            /**
+             * Get sessionStorage reference
+             * @private
+             * @returns {Storage|null}
+             */
+            function getSessionStorage() {
+                if (sessionStorageRef) return sessionStorageRef;
+
+                try {
+                    if (window.sessionStorage && typeof window.sessionStorage !== 'undefined') {
+                        const test = '__sessionStorage_test__';
+                        window.sessionStorage.setItem(test, test);
+                        window.sessionStorage.removeItem(test);
+                        sessionStorageRef = window.sessionStorage;
+                        return sessionStorageRef;
+                    }
+                } catch (e) {
+                    // sessionStorage not available or blocked
+                }
+
+                return null;
+            }
+
+            /**
+             * Initialize storage system and determine best available type
+             * @private
+             */
+            function initialize() {
+                if (initialized) return;
+
+                // Test storage types in order of preference
+                if (testGMStorage()) {
+                    storageType = storageTypes.GM;
+                    console.log('✅ [STORAGE] Using GM storage (persistent across domains)');
+                } else if (getLocalStorage()) {
+                    storageType = storageTypes.LOCAL;
+                    console.log('✅ [STORAGE] Using localStorage');
+                } else if (getSessionStorage()) {
+                    storageType = storageTypes.SESSION;
+                    console.warn('⚠️ [STORAGE] Using sessionStorage (data lost on tab close)');
+                } else {
+                    storageType = storageTypes.MEMORY;
+                    console.warn('⚠️ [STORAGE] Using memory storage (data lost on refresh)');
+                }
+
+                initialized = true;
+            }
+
+            /**
+             * Get item from storage
+             * @param {string} key - Storage key
+             * @param {*} [defaultValue=null] - Default value if not found
+             * @returns {*} Value or default
+             */
+            function getItem(key, defaultValue = null) {
+                initialize();
+
+                try {
+                    let value = null;
+
+                    switch (storageType) {
+                        case storageTypes.GM:
+                            value = GM_getValue(key, null);
+                            break;
+                        case storageTypes.LOCAL:
+                            value = localStorageRef.getItem(key);
+                            break;
+                        case storageTypes.SESSION:
+                            value = sessionStorageRef.getItem(key);
+                            break;
+                        case storageTypes.MEMORY:
+                            value = memoryStore[key] || null;
+                            break;
+                    }
+
+                    // Try to parse JSON if applicable
+                    if (value && typeof value === 'string') {
+                        try {
+                            return JSON.parse(value);
+                        } catch (e) {
+                            return value;
+                        }
+                    }
+
+                    return value !== null ? value : defaultValue;
+                } catch (e) {
+                    console.error('[STORAGE] getItem error:', e);
+                    return defaultValue;
+                }
+            }
+
+            /**
+             * Set item in storage
+             * @param {string} key - Storage key
+             * @param {*} value - Value to store
+             * @returns {boolean} Success status
+             */
+            function setItem(key, value) {
+                initialize();
+
+                try {
+                    // Convert objects to JSON
+                    const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+
+                    switch (storageType) {
+                        case storageTypes.GM:
+                            GM_setValue(key, stringValue);
+                            break;
+                        case storageTypes.LOCAL:
+                            localStorageRef.setItem(key, stringValue);
+                            break;
+                        case storageTypes.SESSION:
+                            sessionStorageRef.setItem(key, stringValue);
+                            break;
+                        case storageTypes.MEMORY:
+                            memoryStore[key] = stringValue;
+                            break;
+                    }
+
+                    return true;
+                } catch (e) {
+                    console.error('[STORAGE] setItem error:', e);
+
+                    // Try fallback to memory if other storage fails
+                    if (storageType !== storageTypes.MEMORY) {
+                        try {
+                            memoryStore[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                            console.warn('[STORAGE] Fallback to memory for key:', key);
+                            return true;
+                        } catch (e2) {}
+                    }
+
+                    return false;
+                }
+            }
+
+            /**
+             * Remove item from storage
+             * @param {string} key - Storage key
+             * @returns {boolean} Success status
+             */
+            function removeItem(key) {
+                initialize();
+
+                try {
+                    switch (storageType) {
+                        case storageTypes.GM:
+                            if (typeof GM_deleteValue !== 'undefined') {
+                                GM_deleteValue(key);
+                            } else {
+                                GM_setValue(key, undefined);
+                            }
+                            break;
+                        case storageTypes.LOCAL:
+                            localStorageRef.removeItem(key);
+                            break;
+                        case storageTypes.SESSION:
+                            sessionStorageRef.removeItem(key);
+                            break;
+                        case storageTypes.MEMORY:
+                            delete memoryStore[key];
+                            break;
+                    }
+
+                    return true;
+                } catch (e) {
+                    console.error('[STORAGE] removeItem error:', e);
+                    return false;
+                }
+            }
+
+            /**
+             * Clear all storage (use with caution)
+             * @returns {boolean} Success status
+             */
+            function clear() {
+                initialize();
+
+                try {
+                    switch (storageType) {
+                        case storageTypes.GM:
+                            // GM storage doesn't have a clear method, would need to track keys
+                            console.warn('[STORAGE] GM storage clear not implemented');
+                            break;
+                        case storageTypes.LOCAL:
+                            localStorageRef.clear();
+                            break;
+                        case storageTypes.SESSION:
+                            sessionStorageRef.clear();
+                            break;
+                        case storageTypes.MEMORY:
+                            Object.keys(memoryStore).forEach(key => delete memoryStore[key]);
+                            break;
+                    }
+
+                    return true;
+                } catch (e) {
+                    console.error('[STORAGE] clear error:', e);
+                    return false;
+                }
+            }
+
+            /**
+             * Get current storage type
+             * @returns {string|null} Current storage type
+             */
+            function getStorageType() {
+                initialize();
+                return storageType;
+            }
+
+            /**
+             * Get storage info for debugging
+             * @returns {Object} Storage information
+             */
+            function getInfo() {
+                initialize();
+                return {
+                    type: storageType,
+                    gmAvailable: gmApiAvailable,
+                    localStorageAvailable: localStorageRef !== null,
+                    sessionStorageAvailable: sessionStorageRef !== null,
+                    memoryKeys: Object.keys(memoryStore).length
+                };
+            }
+
+            // Public API
+            return {
+                get: getItem,
+                set: setItem,
+                remove: removeItem,
+                clear,
+                getType: getStorageType,
+                getInfo,
+
+                // Legacy compatibility
+                getItem,
+                setItem,
+                removeItem,
+
+                // Storage type constants
+                TYPES: storageTypes
+            };
+        })();
+
+        // Legacy compatibility - maintain old references
+        const _safeStorage = Storage; // Kept for backwards compatibility
+        const localStorage = {
+            getItem: key => Storage.get(key),
+            setItem: (key, value) => Storage.set(key, value),
+            removeItem: key => Storage.remove(key),
+            clear: () => Storage.clear(),
+            get length() {
+                console.warn('[STORAGE] localStorage.length not supported in unified storage');
+                return 0;
             },
-            onerror: error => reject(new Error(error.statusText || 'Network error')),
-            ontimeout: () => reject(new Error('Request timeout'))
-          });
-        });
-      } else {
-        // Normal fetch
-        return fetch(url, options);
-      }
-    }
-  };
+            key: _index => {
+                console.warn('[STORAGE] localStorage.key() not supported in unified storage');
+                return null;
+            }
+        };
 
-  /* ============================================================================
-   * 8. UI FRAMEWORK MODULE - ASSET MANAGEMENT
-   * ============================================================================
-   * Compatibility-aware style and font loading
-   */
+        /* ============================================================================
+         * 4. CONFIGURATION MODULE - START
+         * ============================================================================
+         * Global constants, version info, URLs, and configuration values
+         */
 
-  /**
-   * Asset management system for styles, fonts, and icons
-   * @namespace AssetManager
-   */
-  const AssetManager = {
-    addStyles(css, id) {
-      // Discord Fix: Prefer GM_addElement for best CSP compatibility
-      // GM_addElement bypasses CSP better than regular createElement
-      if (typeof GM_addElement === 'function' && CompatibilityMode.flags.enabled) {
-        try {
-          const attrs = { textContent: css };
-          if (id) attrs.id = id;
-          GM_addElement('style', attrs);
-          logDebug('ASSETS', `Added styles via GM_addElement${id ? ` (${id})` : ''} (Discord-safe)`);
+        /**
+         * Main configuration object containing all global settings
+         * @namespace CONFIG
+         * @constant {Object}
+         */
+        const CONFIG = {
+            // Version Information
+            VERSION: {
+                CURRENT: '2.1.1',
+                CHECK_URL_STABLE: 'https://raw.githubusercontent.com/Myke247/MGTools/main/MGTools.user.js',
+                CHECK_URL_BETA: 'https://raw.githubusercontent.com/Myke247/MGTools/Live-Beta/MGTools.user.js',
+                DOWNLOAD_URL_STABLE: 'https://github.com/Myke247/MGTools/raw/refs/heads/main/MGTools.user.js',
+                DOWNLOAD_URL_BETA: 'https://github.com/Myke247/MGTools/raw/refs/heads/Live-Beta/MGTools.user.js'
+            },
+
+            // Debug Settings
+            DEBUG: {
+                PRODUCTION: true, // Set to false for verbose debug logging
+                FLAGS: {
+                    OVERLAY_LIFECYCLE: false,
+                    HANDLER_SETUP: false,
+                    THEME_APPLICATION: false,
+                    VALUE_CALCULATIONS: false,
+                    ABILITY_LOGS: false,
+                    BUTTON_INTERACTIONS: false,
+                    POP_OUT_DESIGN: false,
+                    ERROR_TRACKING: true,
+                    PERFORMANCE: false,
+                    FIX_VALIDATION: false // Enable to see fix debug logs during testing (now controlled by debugMode setting)
+                }
+            },
+
+            // UI Settings
+            UI: {
+                DEFAULT_OPACITY: 95,
+                DEFAULT_POPOUT_OPACITY: 50,
+                DEFAULT_THEME: 'default',
+                DEFAULT_GRADIENT: 'blue-purple',
+                DEFAULT_EFFECT: 'none',
+                DOCK_WIDTH: 380,
+                DOCK_MIN_WIDTH: 320,
+                DOCK_MAX_WIDTH: 600,
+                TAB_HEIGHT: 40,
+                ANIMATION_DURATION: 300
+            },
+
+            // Timing Settings
+            TIMERS: {
+                AUTO_SAVE_INTERVAL: 30000, // 30 seconds
+                CONNECTION_CHECK_INTERVAL: 5000, // 5 seconds
+                HEARTBEAT_INTERVAL: 300000, // 5 minutes
+                SHOP_CHECK_INTERVAL: 3000, // 3 seconds
+                PET_HUNGER_CHECK_INTERVAL: 60000 // 1 minute
+            },
+
+            // API Settings
+            API: {
+                BASE_URL_PRIMARY: 'https://magiccircle.gg',
+                BASE_URL_FALLBACK: 'https://magicgarden.gg',
+                ENDPOINTS: {
+                    ROOMS: '/api/rooms',
+                    SHOP: '/api/shop',
+                    PETS: '/api/pets',
+                    INVENTORY: '/api/inventory'
+                }
+            },
+
+            // Game Data - Decoration Items
+            DECOR_ITEMS: [
+                // Rocks
+                { id: 'SmallRock', name: 'Small Garden Rock', category: 'Rocks' },
+                { id: 'MediumRock', name: 'Medium Garden Rock', category: 'Rocks' },
+                { id: 'LargeRock', name: 'Large Garden Rock', category: 'Rocks' },
+                // Wood Items
+                { id: 'WoodBench', name: 'Wood Bench', category: 'Wood' },
+                { id: 'WoodArch', name: 'Wood Arch', category: 'Wood' },
+                { id: 'WoodBridge', name: 'Wood Bridge', category: 'Wood' },
+                { id: 'WoodLampPost', name: 'Wood Lamp Post', category: 'Wood' },
+                { id: 'WoodOwl', name: 'Wood Owl', category: 'Wood' },
+                { id: 'WoodBirdhouse', name: 'Wood Birdhouse', category: 'Wood' },
+                // Stone Items
+                { id: 'StoneBench', name: 'Stone Bench', category: 'Stone' },
+                { id: 'StoneArch', name: 'Stone Arch', category: 'Stone' },
+                { id: 'StoneBridge', name: 'Stone Bridge', category: 'Stone' },
+                { id: 'StoneLampPost', name: 'Stone Lamp Post', category: 'Stone' },
+                { id: 'StoneGnome', name: 'Stone Gnome', category: 'Stone' },
+                { id: 'StoneBirdbath', name: 'Stone Birdbath', category: 'Stone' },
+                // Marble Items
+                { id: 'MarbleBench', name: 'Marble Bench', category: 'Marble' },
+                { id: 'MarbleArch', name: 'Marble Arch', category: 'Marble' },
+                { id: 'MarbleBridge', name: 'Marble Bridge', category: 'Marble' },
+                { id: 'MarbleLampPost', name: 'Marble Lamp Post', category: 'Marble' }
+            ]
+        };
+
+        // Legacy compatibility - maintain old variable names
+        const CURRENT_VERSION = CONFIG.VERSION.CURRENT;
+        const _VERSION_CHECK_URL_STABLE = CONFIG.VERSION.CHECK_URL_STABLE;
+        const _VERSION_CHECK_URL_BETA = CONFIG.VERSION.CHECK_URL_BETA;
+        const STABLE_DOWNLOAD_URL = CONFIG.VERSION.DOWNLOAD_URL_STABLE;
+        const BETA_DOWNLOAD_URL = CONFIG.VERSION.DOWNLOAD_URL_BETA;
+
+        // Detect if running Live Beta version (check @updateURL in script)
+        // Safe check for Discord pop-out and console paste compatibility
+        const IS_LIVE_BETA = (() => {
+            try {
+                if (typeof GM_info === 'undefined') {
+                    return false;
+                }
+                return GM_info ? .script ? .updateURL ? .includes('Live-Beta') || false;
+            } catch (e) {
+                console.warn('[MGTOOLS] Branch detection failed:', e.message);
+                return false;
+            }
+        })();
+
+        // Detect if running without Tampermonkey (console paste or incompatible environment)
+        const isRunningWithoutTampermonkey = typeof GM_info === 'undefined';
+
+        if (isRunningWithoutTampermonkey) {
+            console.error('%c⚠️ MGTOOLS INSTALLATION ERROR', 'font-size:16px;color:#ff0000;font-weight:bold');
+            console.error('%cMGTools MUST be installed via Tampermonkey!', 'font-size:14px;color:#ff9900');
+            console.error('%cDo NOT paste the script in console - it will not work correctly!', 'font-size:14px;color:#ff9900');
+            console.error(
+                '%c\n📋 Correct Installation:\n1. Install Tampermonkey: https://www.tampermonkey.net/\n2. Click: https://github.com/Myke247/MGTools/raw/main/MGTools.user.js\n3. Click "Install" button\n4. Refresh Magic Garden',
+                'font-size:12px;color:#00ffff'
+            );
+
+            // Try to continue anyway using localStorage fallback
+            console.warn('%c⚠️ Attempting to run in fallback mode (limited functionality)...', 'font-size:12px;color:#ffff00');
+        }
+
+        // Semantic version comparison function
+        function compareVersions(v1, v2) {
+            // Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
+            const parts1 = v1.split('.').map(Number);
+            const parts2 = v2.split('.').map(Number);
+
+            for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+                const part1 = parts1[i] || 0;
+                const part2 = parts2[i] || 0;
+
+                if (part1 > part2) return 1;
+                if (part1 < part2) return -1;
+            }
+
+            return 0;
+        }
+
+        /* ============================================================================
+         * 5. LOGGING MODULE - START
+         * ============================================================================
+         * Unified logging system with production/debug modes and categories
+         */
+
+        /**
+         * Unified logging system with production/debug modes
+         * @namespace Logger
+         */
+        const Logger = (() => {
+            // Configuration
+            const PRODUCTION = CONFIG.DEBUG.PRODUCTION;
+            const DEBUG_FLAGS = CONFIG.DEBUG.FLAGS;
+
+            // Logging levels
+            const LogLevel = {
+                NONE: 0,
+                ERROR: 1,
+                WARN: 2,
+                INFO: 3,
+                DEBUG: 4
+            };
+
+            const CURRENT_LOG_LEVEL = PRODUCTION ? LogLevel.WARN : LogLevel.DEBUG;
+            const tooltipContainer = null;
+
+            /**
+             * Core logging function with level and category support
+             * @private
+             * @param {number} level - Log level
+             * @param {string} category - Log category
+             * @param {string} message - Log message
+             * @param {*} [data] - Optional data to log
+             */
+            function log(level, category, message, data) {
+                if (level > CURRENT_LOG_LEVEL) return;
+
+                const prefix = `[${category}]`;
+                const args = data !== undefined ? [prefix, message, data] : [prefix, message];
+
+                if (level === LogLevel.ERROR) console.error(...args);
+                else if (level === LogLevel.WARN) console.warn(...args);
+                else console.log(...args);
+            }
+
+            /**
+             * Debug log for specific debug flags
+             * @param {string} flag - Debug flag to check
+             * @param {string} message - Log message
+             * @param {*} [data] - Optional data
+             */
+            function debugLog(flag, message, data = null) {
+                if (!PRODUCTION && DEBUG_FLAGS[flag]) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    log(LogLevel.DEBUG, `DEBUG-${flag}`, `${timestamp} ${message}`, data);
+                }
+            }
+
+            /**
+             * Debug error logging
+             * @param {string} flag - Debug flag to check
+             * @param {string} message - Error message
+             * @param {Error} error - Error object
+             * @param {Object} [context] - Additional context
+             */
+            function debugError(flag, message, error, context = {}) {
+                if (DEBUG_FLAGS[flag] || DEBUG_FLAGS.ERROR_TRACKING) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    log(LogLevel.ERROR, `ERROR-${flag}`, `${timestamp} ${message}`, {
+                        error: error,
+                        context: context,
+                        stack: error ? .stack
+                    });
+                }
+            }
+
+            // Public API
+            const api = {
+                // Core logging methods
+                error: (cat, msg, data) => log(LogLevel.ERROR, cat, msg, data),
+                warn: (cat, msg, data) => log(LogLevel.WARN, cat, msg, data),
+                info: (cat, msg, data) => log(LogLevel.INFO, cat, msg, data),
+                debug: (cat, msg, data) => log(LogLevel.DEBUG, cat, msg, data),
+
+                // Debug logging methods
+                debugLog,
+                debugError,
+
+                // Legacy support methods
+                productionLog: (...args) => {
+                    const message = String(args[0] || '');
+                    const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
+                    const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
+                    api.info(category, ...args);
+                },
+                productionWarn: (...args) => {
+                    const message = String(args[0] || '');
+                    const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
+                    const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
+                    api.warn(category, ...args);
+                },
+                productionError: (...args) => {
+                    const message = String(args[0] || '');
+                    const categoryMatch = message.match(/^\[([A-Z][A-Z-]*)\]/);
+                    const category = categoryMatch ? categoryMatch[1] : 'LEGACY';
+                    api.error(category, ...args);
+                }
+            };
+
+            return api;
+        })();
+
+        // Export legacy function names for compatibility
+        const logError = Logger.error;
+        const logWarn = Logger.warn;
+        const logInfo = Logger.info;
+        const logDebug = Logger.debug;
+        const debugLog = Logger.debugLog;
+        const debugError = Logger.debugError;
+        const productionLog = Logger.productionLog;
+        const productionWarn = Logger.productionWarn;
+        const productionError = Logger.productionError;
+
+        // Export globally for IIFE access
+        if (typeof window !== 'undefined') {
+            window.Logger = Logger;
+            window.productionLog = productionLog;
+            window.productionWarn = productionWarn;
+            window.productionError = productionError;
+            window.debugLog = debugLog;
+            window.debugError = debugError;
+        }
+
+        /* ============================================================================
+         * 6. COMPATIBILITY MODULE - EXTENDED
+         * ============================================================================
+         * Advanced CSP detection and compatibility mode for Discord/managed devices
+         */
+
+        /**
+         * Compatibility mode system for handling restricted environments
+         * @namespace CompatibilityMode
+         */
+        const CompatibilityMode = {
+            flags: {
+                enabled: false,
+                blockExternalFonts: false,
+                blockExternalBeacons: false,
+                wsReconnectWhenHidden: false,
+                strictNoEvalDynamicImport: false,
+                inlineAssetsOnly: false,
+                uiReducedMode: false,
+                domOnlyStyles: false,
+                bypassCSPNetworking: false
+            },
+
+            detectionComplete: false,
+            cspViolations: [],
+            detectionReason: null,
+
+            detect() {
+                // Check for user override first
+                try {
+                    const disabled = localStorage.getItem('mgtools_compat_disabled');
+                    if (disabled === 'true') {
+                        logInfo('COMPAT', 'Compatibility mode disabled by user');
+                        this.detectionComplete = true;
+                        return;
+                    }
+
+                    const forced = localStorage.getItem('mgtools_compat_forced');
+                    if (forced === 'true') {
+                        this.enableCompat('user-forced');
+                        this.detectionComplete = true;
+                        return;
+                    }
+                } catch (e) {
+                    logWarn('COMPAT', 'Unable to check localStorage for compat settings', e);
+                }
+
+                // 1. Discord embed detection (enhanced)
+                const host = window.location.host;
+                const isDiscordHost =
+                    host.includes('discordsays.com') ||
+                    host.includes('discordactivities.com') ||
+                    host.includes('discord.gg') ||
+                    host.includes('discord.com');
+                const isDiscordDesktop = typeof window.DiscordNative !== 'undefined';
+                const inDiscordIframe = window !== window.top && document.referrer ? .includes('discord');
+                const hasDiscordSDK = typeof window.DiscordSDK !== 'undefined' || typeof window.__DISCORD__ !== 'undefined';
+
+                const isDiscordEmbed = isDiscordHost || isDiscordDesktop || inDiscordIframe || hasDiscordSDK;
+
+                if (CONFIG.DEBUG.FLAGS.FIX_VALIDATION) {
+                    console.log('[FIX_DISCORD]', {
+                        host: isDiscordHost,
+                        desktop: isDiscordDesktop,
+                        iframe: inDiscordIframe,
+                        sdk: hasDiscordSDK,
+                        scope: typeof unsafeWindow !== 'undefined' ? 'unsafeWindow' : 'window'
+                    });
+                }
+
+                /**
+                 * Discord CSP Constraints:
+                 * - No external stylesheets (Google Fonts blocked)
+                 * - Limited fetch (use GM_xmlhttpRequest)
+                 * - Storage fallback to sessionStorage/memory
+                 * - Scope bridging via unsafeWindow when available
+                 */
+
+                if (isDiscordEmbed) {
+                    this.enableCompat('discord-embed');
+                    this.detectionComplete = true;
+                    return;
+                }
+
+                // 2. CSP violation listener (500ms window) with duplicate prevention
+                // CRITICAL FIX: Opera/Tampermonkey makes console.error read-only, causing fatal crash
+                const self = this;
+                const seenCSPMessages = new Set();
+
+                try {
+                    // Check if console.error is writable before attempting override
+                    const descriptor = Object.getOwnPropertyDescriptor(console, 'error');
+                    const canOverride = !descriptor || descriptor.writable || descriptor.configurable;
+
+                    if (canOverride) {
+                        // Safe to override console.error
+                        const originalError = console.error.bind(console);
+
+                        console.error = function(...args) {
+                            const msg = args.join(' ');
+
+                            // Check for CSP-related errors
+                            if (
+                                (msg.includes('Content Security Policy') ||
+                                    msg.includes('Refused to load') ||
+                                    msg.includes('violates the following')) &&
+                                !msg.includes('mgtools')
+                            ) {
+                                // Ignore our own CSP issues
+
+                                // Skip duplicate CSP violations to reduce console spam
+                                if (seenCSPMessages.has(msg)) {
+                                    return; // Silently skip duplicate
+                                }
+                                seenCSPMessages.add(msg);
+
+                                self.cspViolations.push(msg);
+                                if (self.cspViolations.length >= 2 && !self.flags.enabled) {
+                                    self.enableCompat('csp-violations');
+                                }
+                            }
+                            return originalError.apply(console, args);
+                        };
+
+                        logInfo('COMPAT', '✅ Console.error override successful for CSP detection');
+                    } else {
+                        // Console.error is read-only (Opera/Tampermonkey) - use alternative detection
+                        logWarn('COMPAT', '⚠️ Console.error is read-only, using alternative CSP detection');
+
+                        // Alternative: listen for window error events
+                        window.addEventListener(
+                            'error',
+                            event => {
+                                const msg = event.message || '';
+                                if (
+                                    (msg.includes('Content Security Policy') ||
+                                        msg.includes('Refused to load') ||
+                                        msg.includes('violates the following')) &&
+                                    !msg.includes('mgtools') &&
+                                    !seenCSPMessages.has(msg)
+                                ) {
+                                    seenCSPMessages.add(msg);
+                                    self.cspViolations.push(msg);
+                                    if (self.cspViolations.length >= 2 && !self.flags.enabled) {
+                                        self.enableCompat('csp-violations');
+                                    }
+                                }
+                            },
+                            true
+                        );
+                    }
+                } catch (e) {
+                    // Complete failure - continue without CSP detection
+                    logWarn('COMPAT', '❌ Cannot setup CSP detection:', e.message);
+                    logInfo('COMPAT', 'Continuing without CSP violation detection');
+                }
+
+                // 3. Test storage availability
+                setTimeout(() => {
+                    if (!this.flags.enabled) {
+                        try {
+                            const testKey = '__mgtools_compat_test_' + Date.now();
+                            GM_setValue(testKey, 'test');
+                            GM_deleteValue(testKey);
+                        } catch (e) {
+                            this.enableCompat('storage-failed');
+                        }
+                    }
+
+                    this.detectionComplete = true;
+                    if (this.flags.enabled) {
+                        logInfo('COMPAT', 'Compatibility mode ACTIVE', {
+                            reason: this.detectionReason,
+                            violations: this.cspViolations.length
+                        });
+                    } else {
+                        logDebug('COMPAT', 'Compatibility mode not needed, running in normal mode');
+                    }
+                }, 500);
+            },
+
+            enableCompat(reason) {
+                if (this.flags.enabled) return; // Already enabled
+
+                logInfo('COMPAT', `Enabling compatibility mode: ${reason}`);
+
+                // Discord Fix: Add detailed Discord-specific logging
+                const isDiscordReason = reason.includes('discord') || reason.includes('csp');
+                if (isDiscordReason) {
+                    productionLog('🎮 [DISCORD] Compatibility mode activated for Discord environment');
+                    productionLog('   📋 [DISCORD] Features enabled:');
+                    productionLog('      • Inline styles only (no external CSS)');
+                    productionLog('      • System fonts (no Google Fonts CDN)');
+                    productionLog('      • GM_xmlhttpRequest for network requests');
+                    productionLog('      • DOM mutation observer for UI persistence');
+                }
+
+                this.detectionReason = reason;
+                this.flags.enabled = true;
+                this.flags.blockExternalFonts = true;
+                this.flags.blockExternalBeacons = true;
+                this.flags.wsReconnectWhenHidden = true;
+                this.flags.strictNoEvalDynamicImport = true;
+                this.flags.inlineAssetsOnly = true;
+                this.flags.uiReducedMode = true;
+                this.flags.domOnlyStyles = true;
+                this.flags.bypassCSPNetworking = true;
+
+                // Save preference
+                try {
+                    localStorage.setItem('mgtools_compat_mode', 'true');
+                    localStorage.setItem('mgtools_compat_reason', reason);
+                } catch (e) {
+                    // Ignore localStorage errors in restricted environments
+                }
+            },
+
+            disableCompat() {
+                this.flags.enabled = false;
+                Object.keys(this.flags).forEach(key => {
+                    if (key !== 'enabled') this.flags[key] = false;
+                });
+
+                try {
+                    localStorage.setItem('mgtools_compat_disabled', 'true');
+                    localStorage.removeItem('mgtools_compat_mode');
+                } catch (e) {}
+
+                logInfo('COMPAT', 'Compatibility mode disabled');
+            },
+
+            isEnabled() {
+                return this.flags.enabled;
+            }
+        };
+
+        // Initialize compatibility detection immediately
+        CompatibilityMode.detect();
+
+        /* ============================================================================
+         * 7. NETWORK MODULE - START
+         * ============================================================================
+         * Unified network layer with CSP bypass capabilities
+         */
+
+        /**
+         * Network abstraction layer with fallback to GM_xmlhttpRequest
+         * @namespace Network
+         */
+        const Network = {
+            async fetch(url, options = {}) {
+                if (
+                    CompatibilityMode.flags.bypassCSPNetworking &&
+                    typeof GM_xmlhttpRequest === 'function' &&
+                    !url.startsWith(window.location.origin)
+                ) {
+                    // Use GM_xmlhttpRequest to bypass CSP for external requests
+                    logDebug('NETWORK', `Using GM_xmlhttpRequest for: ${url}`);
+                    return new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            url,
+                            method: options.method || 'GET',
+                            headers: options.headers || {},
+                            data: options.body,
+                            responseType: 'text',
+                            timeout: options.timeout || 10000,
+                            onload: response => {
+                                resolve({
+                                    ok: response.status >= 200 && response.status < 300,
+                                    status: response.status,
+                                    statusText: response.statusText,
+                                    text: () => Promise.resolve(response.responseText),
+                                    json: () => Promise.resolve(JSON.parse(response.responseText)),
+                                    headers: {
+                                        get: name => response.responseHeaders.match(new RegExp(`^${name}:\\s*(.*)$`, 'mi')) ? .[1]
+                                    }
+                                });
+                            },
+                            onerror: error => reject(new Error(error.statusText || 'Network error')),
+                            ontimeout: () => reject(new Error('Request timeout'))
+                        });
+                    });
+                } else {
+                    // Normal fetch
+                    return fetch(url, options);
+                }
+            }
+        };
+
+        /* ============================================================================
+         * 8. UI FRAMEWORK MODULE - ASSET MANAGEMENT
+         * ============================================================================
+         * Compatibility-aware style and font loading
+         */
+
+        /**
+         * Asset management system for styles, fonts, and icons
+         * @namespace AssetManager
+         */
+        const AssetManager = {
+                addStyles(css, id) {
+                    // Discord Fix: Prefer GM_addElement for best CSP compatibility
+                    // GM_addElement bypasses CSP better than regular createElement
+                    if (typeof GM_addElement === 'function' && CompatibilityMode.flags.enabled) {
+                        try {
+                            const attrs = { textContent: css };
+                            if (id) attrs.id = id;
+                            GM_addElement('style', attrs);
+                            logDebug('ASSETS', `Added styles via GM_addElement${id ? ` (${id})` : ''} (Discord-safe)`);
           return;
         } catch (e) {
           logWarn('ASSETS', 'GM_addElement failed, falling back to standard method', e);
@@ -16422,12 +16422,13 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
 
     // ==================== HUA AUTO-BUY SYSTEM ====================
 
-    const AUTO_BUY_ITEMS = ['Carrot'];
+    const AUTO_BUY_ITEMS = [];
 
     let autoBuyInitizlied = false;
     let autoBuyInterval = null;
 
     function initializeAutoBuy() {
+      console.log('Hua init');
       if (autoBuyInitizlied) return;
 
       productionLog('Auto buy initializing auto buy system', AUTO_BUY_ITEMS);
@@ -16451,7 +16452,7 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
           return;
         }
 
-        AUTO_BUY_ITEMS.forEach(itemId => {
+        itemIds.forEach(itemId => {
           const shopTypes = ['seed', 'egg', 'tool', 'decor'];
           for (const shopType of shopTypes) {
             if (!shop || !shop.item) continue;
@@ -16478,8 +16479,9 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
      async function autoBuyItem(itemId, shopType, amount) {
       try {
         if (UnifiedState.data.settings.debugMode) {
-          productionLog(`Auto buy attemping to buy ${itemId} with stock: ${stock}`);
+          productionLog(`Auto buy attemping to buy  ${itemId} with stock: ${stock}`);
         }
+        console.log(`Auto buy attemping to buy  ${itemId} with stock: ${stock}`);
 
         const payload = {
           type: 'BuyShopItem',
@@ -16490,6 +16492,7 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
         await rcSend(payload);
         productionLog(`Auto buy Purchased  ${itemId} with stock: ${stock}`);
         showNotificationToast(`Auto buy ${itemId} x  ${stock}`, 'success');
+        console.log(`Auto buy Purchased  ${itemId} with stock: ${stock}`);
       } catch (error) {
         console.error(`Auto buy error checking for ${itemId}: `, error);
       }
@@ -16497,11 +16500,22 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
 
      targetWindow.autoBuyDebug = {
       checkAndBuyItems,
-      getItems: () => AUTO_BUY_ITEMS,
-      testBuy: () => {
-        productionLog('Auto buy manula tet trigger');
-        checkAndBuyItems()
-      }
+      enable: () => {
+        UnifiedState.data.settings.autoBuy.enable = true;
+        MGA_saveJSON('MGA_data', UnifiedState.data);
+        productionLog('Auto buy enable via debug');
+      },
+      disable: () => {
+        UnifiedState.data.settings.autoBuy.enable = false;
+        MGA_saveJSON('MGA_data', UnifiedState.data);
+        productionLog('Auto buy disable via debug');
+      },
+      setItems: (items) => {
+        UnifiedState.data.settings.autoBuy.itemIds = items;
+        MGA_saveJSON('MGA_data', UnifiedState.data);
+        productionLog('Auto buy items list updated:', items);
+      },
+      getSettings: () => UnifiedState.data.settings.autoBuy
      };
 
     // ==================== EVENT-DRIVEN SHOP MONITORING ====================
@@ -16697,9 +16711,6 @@ console.log('[MGTOOLS-DEBUG] 4. Window type:', window === window.top ? 'TOP' : '
 
       // Start watching
       watchShopData();
-
-      // HUA AUTO-BUY SYSTEM
-      initializeAutoBuy();
 
       // DISABLED: MutationObserver causes severe FPS lag - relying on Proxy and polling only
       // if (typeof MutationObserver !== 'undefined') {
